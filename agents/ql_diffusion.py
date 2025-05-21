@@ -13,6 +13,8 @@ from agents.diffusion import Diffusion
 from agents.model import MLP
 from agents.helpers import EMA
 
+from tqdm import tqdm
+
 
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim=256):
@@ -107,21 +109,21 @@ class Diffusion_QL(object):
     def train(self, replay_buffer, iterations, batch_size=100, log_writer=None):
 
         metric = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
-        for _ in range(iterations):
+        for _ in tqdm(range(iterations), desc="Training iterations"):
             # Sample replay buffer / batch
             state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
             """ Q Training """
             current_q1, current_q2 = self.critic(state, action)
 
-            if self.max_q_backup:
+            if self.max_q_backup:             # conservative Q-learning
                 next_state_rpt = torch.repeat_interleave(next_state, repeats=10, dim=0)
                 next_action_rpt = self.ema_model(next_state_rpt)
                 target_q1, target_q2 = self.critic_target(next_state_rpt, next_action_rpt)
                 target_q1 = target_q1.view(batch_size, 10).max(dim=1, keepdim=True)[0]
                 target_q2 = target_q2.view(batch_size, 10).max(dim=1, keepdim=True)[0]
                 target_q = torch.min(target_q1, target_q2)
-            else:
+            else:                             # Double Q-Learning
                 next_action = self.ema_model(next_state)
                 target_q1, target_q2 = self.critic_target(next_state, next_action)
                 target_q = torch.min(target_q1, target_q2)

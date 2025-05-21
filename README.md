@@ -20,6 +20,9 @@ We further show that our method can achieve state-of-the-art performance on the 
 
 ### Requirements
 Installations of [PyTorch](https://pytorch.org/), [MuJoCo](https://github.com/deepmind/mujoco), and [D4RL](https://github.com/Farama-Foundation/D4RL) are needed. Please see the ``requirements.txt`` for environment set up details.
+```.bash
+minari download mujoco/walker2d/medium-v0
+```
 
 ### Running
 Running experiments based our code could be quite easy, so below we use `walker2d-medium-expert-v2` dataset as an example. 
@@ -27,7 +30,7 @@ Running experiments based our code could be quite easy, so below we use `walker2
 For reproducing the optimal results, we recommend running with 'online model selection' as follows. 
 The best_score will be stored in the `best_score_online.txt` file.
 ```.bash
-python main.py --env_name walker2d-medium-expert-v2 --device 0 --ms online --lr_decay
+python main.py --env_name Walker2d-v5 --device 0 --ms online --lr_decay
 ```
 
 For conducting 'offline model selection', run the code below. The best_score will be stored in the `best_score_offline.txt` file.
