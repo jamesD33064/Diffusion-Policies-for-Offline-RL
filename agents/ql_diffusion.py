@@ -86,7 +86,7 @@ class Diffusion_QL(object):
 
         self.critic = Critic(state_dim, action_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=5e-5)
 
         if lr_decay:
             self.actor_lr_scheduler = CosineAnnealingLR(self.actor_optimizer, T_max=lr_maxt, eta_min=0.)
@@ -170,6 +170,7 @@ class Diffusion_QL(object):
                 if self.grad_norm > 0:
                     log_writer.add_scalar('Actor Grad Norm', actor_grad_norms.max().item(), self.step)
                     log_writer.add_scalar('Critic Grad Norm', critic_grad_norms.max().item(), self.step)
+                log_writer.add_scalar('Actor Loss', actor_loss.item(), self.step)
                 log_writer.add_scalar('BC Loss', bc_loss.item(), self.step)
                 log_writer.add_scalar('QL Loss', q_loss.item(), self.step)
                 log_writer.add_scalar('Critic Loss', critic_loss.item(), self.step)
