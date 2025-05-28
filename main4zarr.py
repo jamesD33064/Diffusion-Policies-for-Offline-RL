@@ -23,6 +23,7 @@ from agents.ql_diffusion import Diffusion_QL as Agent
 # --------------------------------------------------------
 # Globals ────────────── hyper-parameters per dataset
 # --------------------------------------------------------
+dataset_path = 'DiffusionQL_MoveTo_V3.zarr'
 hyperparameters: Dict[str, Dict] = {
     'CMO_MoveTo':   {'s_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1}
 }
@@ -103,7 +104,7 @@ def train_agent(state_dim: int, action_dim: int, max_action: float,
                 device: str, output_dir: str, args: argparse.Namespace) -> None:
 
     # 1) -------- Load offline buffer ---------------------------------------
-    dataset = load_dataset_from_zarr('DiffusionPolicy_MoveTo_V3.zarr', action_dim=action_dim)
+    dataset = load_dataset_from_zarr(dataset_path, action_dim=action_dim)
     # for i in dataset.keys():
     #     print(i, dataset[i].shape)
     data_sampler = Data_Sampler(dataset, device, args.reward_tune)
@@ -167,7 +168,7 @@ if __name__ == "__main__":
     p.add_argument('--save_best_model', default=True, action='store_true')
 
     # ----- optimisation ---------------------------------------------------
-    p.add_argument("--batch_size", default=256, type=int)
+    p.add_argument("--batch_size", default=32, type=int)
     p.add_argument("--lr_decay", action="store_true")
     p.add_argument("--early_stop", action="store_true")
 

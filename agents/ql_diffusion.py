@@ -106,7 +106,7 @@ class Diffusion_QL(object):
             return
         self.ema.update_model_average(self.ema_model, self.actor)
 
-    def train(self, replay_buffer, iterations, batch_size=100, log_writer=None):
+    def train(self, replay_buffer, iterations, batch_size=32, log_writer=None):
 
         metric = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
         for _ in tqdm(range(iterations), desc="Training iterations"):
@@ -114,7 +114,7 @@ class Diffusion_QL(object):
             state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
             """ Q Training """
-            current_q1, current_q2 = self.critic(state, action)
+            current_q1, _ = self.critic(state, action)
 
             if self.max_q_backup:             # conservative Q-learning
                 next_state_rpt = torch.repeat_interleave(next_state, repeats=10, dim=0)
@@ -123,14 +123,12 @@ class Diffusion_QL(object):
                 target_q1 = target_q1.view(batch_size, 10).max(dim=1, keepdim=True)[0]
                 target_q2 = target_q2.view(batch_size, 10).max(dim=1, keepdim=True)[0]
                 target_q = torch.min(target_q1, target_q2)
-            else:                             # Double Q-Learning
+            else:  # 單一 Q 網路，直接計算 target_q
                 next_action = self.ema_model(next_state)
-                target_q1, target_q2 = self.critic_target(next_state, next_action)
-                target_q = torch.min(target_q1, target_q2)
-
+                target_q, _ = self.critic_target(next_state, next_action)
             target_q = (reward + not_done * self.discount * target_q).detach()
 
-            critic_loss = F.mse_loss(current_q1, target_q) + F.mse_loss(current_q2, target_q)
+            critic_loss = F.mse_loss(current_q1, target_q)
 
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
@@ -141,12 +139,12 @@ class Diffusion_QL(object):
             """ Policy Training """
             bc_loss = self.actor.loss(action, state)
             new_action = self.actor(state)
+            action_mse = F.mse_loss(new_action, action)
 
-            q1_new_action, q2_new_action = self.critic(state, new_action)
-            if np.random.uniform() > 0.5:
-                q_loss = - q1_new_action.mean() / q2_new_action.abs().mean().detach()
-            else:
-                q_loss = - q2_new_action.mean() / q1_new_action.abs().mean().detach()
+            q1_new_action, _ = self.critic(state, new_action)
+            # q_loss = - q1_new_action.mean()
+            q_scale = q1_new_action.abs().mean().detach()
+            q_loss = - q1_new_action.mean() / (q_scale + 1e-6) 
             actor_loss = bc_loss + self.eta * q_loss
 
             self.actor_optimizer.zero_grad()
@@ -154,7 +152,6 @@ class Diffusion_QL(object):
             if self.grad_norm > 0: 
                 actor_grad_norms = nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.grad_norm, norm_type=2)
             self.actor_optimizer.step()
-
 
             """ Step Target network """
             if self.step % self.update_ema_every == 0:
@@ -168,12 +165,13 @@ class Diffusion_QL(object):
             """ Log """
             if log_writer is not None:
                 if self.grad_norm > 0:
-                    log_writer.add_scalar('Actor Grad Norm', actor_grad_norms.max().item(), self.step)
-                    log_writer.add_scalar('Critic Grad Norm', critic_grad_norms.max().item(), self.step)
-                log_writer.add_scalar('Actor Loss', actor_loss.item(), self.step)
-                log_writer.add_scalar('BC Loss', bc_loss.item(), self.step)
-                log_writer.add_scalar('QL Loss', q_loss.item(), self.step)
-                log_writer.add_scalar('Critic Loss', critic_loss.item(), self.step)
+                    log_writer.add_scalar('Gradient/Actor Grad Norm', actor_grad_norms.max().item(), self.step)
+                    log_writer.add_scalar('Gradient/Critic Grad Norm', critic_grad_norms.max().item(), self.step)
+                log_writer.add_scalar('Loss/Actor Loss', actor_loss.item(), self.step)
+                log_writer.add_scalar('Loss/BC Loss', bc_loss.item(), self.step)
+                log_writer.add_scalar('Loss/Action Loss', action_mse.item(), self.step)
+                log_writer.add_scalar('Loss/QL Loss', q_loss.item(), self.step)
+                log_writer.add_scalar('Loss/Critic Loss', critic_loss.item(), self.step)
                 log_writer.add_scalar('Target_Q Mean', target_q.mean().item(), self.step)
 
             metric['actor_loss'].append(actor_loss.item())
