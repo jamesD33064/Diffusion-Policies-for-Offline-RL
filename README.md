@@ -25,6 +25,15 @@ minari download mujoco/walker2d/medium-v0
 ```
 
 ### Running
+
+```
+python main4zarr.py --env_name << env name >> --lr_decay --exp << exp number >>
+
+# example
+python main4zarr.py --env_name CMO_1V1 --lr_decay --exp 1
+```
+
+
 Running experiments based our code could be quite easy, so below we use `walker2d-medium-expert-v2` dataset as an example. 
 
 For reproducing the optimal results, we recommend running with 'online model selection' as follows. 

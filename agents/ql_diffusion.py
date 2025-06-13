@@ -168,12 +168,12 @@ class Diffusion_QL(object):
             """ Log """
             if log_writer is not None:
                 if self.grad_norm > 0:
-                    log_writer.add_scalar('Actor Grad Norm', actor_grad_norms.max().item(), self.step)
-                    log_writer.add_scalar('Critic Grad Norm', critic_grad_norms.max().item(), self.step)
-                log_writer.add_scalar('Actor Loss', actor_loss.item(), self.step)
-                log_writer.add_scalar('BC Loss', bc_loss.item(), self.step)
-                log_writer.add_scalar('QL Loss', q_loss.item(), self.step)
-                log_writer.add_scalar('Critic Loss', critic_loss.item(), self.step)
+                    log_writer.add_scalar('Gradient/Actor Grad Norm', actor_grad_norms.max().item(), self.step)
+                    log_writer.add_scalar('Gradient/Critic Grad Norm', critic_grad_norms.max().item(), self.step)
+                log_writer.add_scalar('Loss/Actor Loss', actor_loss.item(), self.step)
+                log_writer.add_scalar('Loss/BC Loss', bc_loss.item(), self.step)
+                log_writer.add_scalar('Loss/QL Loss', q_loss.item(), self.step)
+                log_writer.add_scalar('Loss/Critic Loss', critic_loss.item(), self.step)
                 log_writer.add_scalar('Target_Q Mean', target_q.mean().item(), self.step)
 
             metric['actor_loss'].append(actor_loss.item())

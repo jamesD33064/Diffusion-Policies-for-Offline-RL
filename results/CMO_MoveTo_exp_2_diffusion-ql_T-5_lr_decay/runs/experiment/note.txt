@@ -1,6 +1,0 @@
-self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
-                    |
-                    v
-self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=5e-5)
-
-修改 critic learning rate 還是梯度爆炸

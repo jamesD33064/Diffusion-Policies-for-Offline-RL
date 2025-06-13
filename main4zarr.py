@@ -24,7 +24,8 @@ from agents.ql_diffusion import Diffusion_QL as Agent
 # Globals ────────────── hyper-parameters per dataset
 # --------------------------------------------------------
 hyperparameters: Dict[str, Dict] = {
-    'CMO_MoveTo':   {'s_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1}
+    'CMO_MoveTo':   {'dataset_name':'DiffusionQL_MoveTo_V3.zarr', 's_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1},
+    'CMO_1V1':      {'dataset_name':'DiffusionQL_1v1_V3.zarr', 's_dim': 8, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1}
 }
 
 # --------------------------------------------------------
@@ -99,11 +100,11 @@ def load_dataset_from_zarr(dataset_path: str, action_dim: int = None) -> Dict[st
 # Main training loop (only diff: dataset loader & eval normalized score)
 # --------------------------------------------------------
 
-def train_agent(state_dim: int, action_dim: int, max_action: float,
+def train_agent(dataset_name: str, state_dim: int, action_dim: int, max_action: float,
                 device: str, output_dir: str, args: argparse.Namespace) -> None:
 
     # 1) -------- Load offline buffer ---------------------------------------
-    dataset = load_dataset_from_zarr('DiffusionPolicy_MoveTo_V3.zarr', action_dim=action_dim)
+    dataset = load_dataset_from_zarr(dataset_name, action_dim=action_dim)
     # for i in dataset.keys():
     #     print(i, dataset[i].shape)
     data_sampler = Data_Sampler(dataset, device, args.reward_tune)
@@ -149,7 +150,7 @@ def train_agent(state_dim: int, action_dim: int, max_action: float,
             break
 
         # save model -------------------------------------
-        if args.save_best_model:
+        if args.save_model_per_iter is not None and curr_epoch % args.save_model_per_iter == 0:
             agent.save_model(output_dir, curr_epoch)
 
 # ---------------------------------------------------------------------------
@@ -160,11 +161,11 @@ if __name__ == "__main__":
     # ----- experiment settings -------------------------------------------
     p.add_argument("--exp", default="1")
     p.add_argument("--device", default=0, type=int)
-    p.add_argument("--env_name", default="walker2d-medium-expert-v2")
+    p.add_argument("--env_name")
     p.add_argument("--dir", default="results")
     p.add_argument("--seed", default=0, type=int)
     p.add_argument("--num_steps_per_epoch", default=1000, type=int)
-    p.add_argument('--save_best_model', default=True, action='store_true')
+    p.add_argument('--save_model_per_iter', default=10)
 
     # ----- optimisation ---------------------------------------------------
     p.add_argument("--batch_size", default=256, type=int)
@@ -209,6 +210,7 @@ if __name__ == "__main__":
 
     # ---------- train -----------------------------------------------------
     train_agent(
+        dataset_name=args.dataset_name,
         state_dim=args.s_dim,
         action_dim=args.a_dim,
         max_action=1.0, # 因為 one hot 所以是 1
