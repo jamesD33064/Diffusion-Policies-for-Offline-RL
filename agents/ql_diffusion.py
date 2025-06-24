@@ -99,7 +99,6 @@ class Diffusion_QL(object):
         self.tau = tau
         self.eta = eta  # q_learning weight
         self.device = device
-        self.max_q_backup = max_q_backup
 
     def step_ema(self):
         if self.step < self.step_start_ema:
@@ -107,26 +106,19 @@ class Diffusion_QL(object):
         self.ema.update_model_average(self.ema_model, self.actor)
 
     def train(self, replay_buffer, iterations, batch_size=100, log_writer=None):
-
         metric = {'bc_loss': [], 'ql_loss': [], 'actor_loss': [], 'critic_loss': []}
+
         for _ in tqdm(range(iterations), desc="Training iterations"):
             # Sample replay buffer / batch
             state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
-            """ Q Training """
+            """ Q (Critic) Training """
             current_q1, current_q2 = self.critic(state, action)
 
-            if self.max_q_backup:             # conservative Q-learning
-                next_state_rpt = torch.repeat_interleave(next_state, repeats=10, dim=0)
-                next_action_rpt = self.ema_model(next_state_rpt)
-                target_q1, target_q2 = self.critic_target(next_state_rpt, next_action_rpt)
-                target_q1 = target_q1.view(batch_size, 10).max(dim=1, keepdim=True)[0]
-                target_q2 = target_q2.view(batch_size, 10).max(dim=1, keepdim=True)[0]
-                target_q = torch.min(target_q1, target_q2)
-            else:                             # Double Q-Learning
-                next_action = self.ema_model(next_state)
-                target_q1, target_q2 = self.critic_target(next_state, next_action)
-                target_q = torch.min(target_q1, target_q2)
+            # Double Q-Learning
+            next_action = self.ema_model(next_state)
+            target_q1, target_q2 = self.critic_target(next_state, next_action)
+            target_q = torch.min(target_q1, target_q2)
 
             target_q = (reward + not_done * self.discount * target_q).detach()
 
@@ -138,7 +130,7 @@ class Diffusion_QL(object):
                 critic_grad_norms = nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.grad_norm, norm_type=2)
             self.critic_optimizer.step()
 
-            """ Policy Training """
+            """ Policy (Actor) Training """
             bc_loss = self.actor.loss(action, state)
             new_action = self.actor(state)
 

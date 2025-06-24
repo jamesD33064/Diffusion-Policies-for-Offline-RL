@@ -24,8 +24,9 @@ from agents.ql_diffusion import Diffusion_QL as Agent
 # Globals ────────────── hyper-parameters per dataset
 # --------------------------------------------------------
 hyperparameters: Dict[str, Dict] = {
-    'CMO_MoveTo':   {'dataset_name':'DiffusionQL_MoveTo_V3.zarr', 's_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1},
-    'CMO_1V1':      {'dataset_name':'DiffusionQL_1v1_V3.zarr', 's_dim': 8, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1}
+    'CMO_MoveTo':   {'dataset_name':'DiffusionQL_MoveTo_V3.zarr', 'n_agent': 1, 's_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1},
+    'CMO_1V1':      {'dataset_name':'DiffusionQL_1v1_V2.zarr', 'n_agent': 1, 's_dim': 8, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1},
+    'CMO_3V3':      {'dataset_name':'DiffusionQL_3v3_V1.zarr', 'n_agent': 3, 'state_l_dim': 29, 'state_g_dim': 27, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1}
 }
 
 # --------------------------------------------------------
@@ -40,90 +41,131 @@ def sanitize(path: str | Path) -> str:
 # --------------------------------------------------------
 # Dataset loading via zarr
 # --------------------------------------------------------
+from typing import Dict
+import numpy as np
+import argparse
+import zarr
+from tqdm import tqdm
 
-def load_dataset_from_zarr(dataset_path: str, action_dim: int = None) -> Dict[str, np.ndarray]:
-    import zarr
+def load_dataset_from_zarr(
+    dataset_path: str,
+    action_dim: int,
+    args: argparse.Namespace
+) -> Dict[str, np.ndarray]:
     root = zarr.open(dataset_path, mode='r')
-    data_grp = root['data']
-    obs_all   = data_grp['state'][:]          # (T+N_epis, obs_dim)
-    act_all   = data_grp['action'][:]         # (T+N_epis, act_dim)
-    rew_all   = data_grp['reward'][:]         # (T+N_epis,)
-    done_all  = data_grp['done'][:]           # (T+N_epis,)
-    ends      = root['meta']['episode_ends'][:]
+    data_grp = root["data"]
 
-    # action 轉成 one hot
-    num_actions = (
-        action_dim
-        if action_dim is not None
-        else int(act.max()) + 1
-    )
-    act_all = np.eye(num_actions, dtype=np.float32)[act_all]
+    if args.n_agent > 1:
+        # === Read Multi Agent ===
+        local_all  = data_grp["local_state"][:]          # (T_tot , n_agent, obs_l)
+        global_all = data_grp["global_state"][:]         # (T_tot , obs_g)
+        act_raw    = data_grp["action"][:]               # (T_tot , n_agent, 1)
+        rew_all    = data_grp["reward"][:]               # (T_tot , n_agent, 1)
+    else:
+        # === Read Single Agent ===
+        obs_all = data_grp["state"][:]                   # (T_tot , obs_dim)
+        act_raw = data_grp["action"][:]                  # (T_tot ,)
+        rew_all = data_grp["reward"][:]                  # (T_tot ,)
+    done_all   = data_grp["done"][:]
+    ends       = root["meta"]["episode_ends"][:]
 
-    # 製作回傳格式
-    obs_list, next_obs_list, act_list, rew_list, done_list = [], [], [], [], []
+    # -------- 動作 one-hot --------
+    num_actions = action_dim if action_dim else int(act_raw.max()) + 1
+    # 對任意 shape 的 act_raw one-hot
+    act_flat = act_raw.reshape(-1)
+    act_oh   = np.eye(num_actions, dtype=np.float32)[act_flat]
+    act_all  = act_oh.reshape(*act_raw.shape, num_actions)
+    if act_raw.shape[-1] == 1: act_all = act_all.squeeze(2) # TODO 這裡之後要改成應對 n agent是1 的狀況
 
+    # -------- episode 逐段切 --------
+    segs = []
     prev = 0
-    for end in tqdm(ends):
-        obs   = obs_all[prev:end]
-        nexto = obs_all[prev+1:end+1]
-        act   = act_all[prev:end]
-        rew   = rew_all[prev:end]
-        done  = done_all[prev:end]
-
-        if len(nexto) < len(obs):
-            obs, act, rew, done = obs[:-1], act[:-1], rew[:-1], done[:-1]
-            nexto = nexto[:-1]
-
-        obs_list.append(obs)
-        next_obs_list.append(nexto)
-        act_list.append(act)
-        rew_list.append(rew)
-        done_list.append(done)
-
+    for end in ends:
+        segs.append(slice(prev, end))
         prev = end
 
-    observations      = np.concatenate(obs_list, axis=0)
-    next_observations = np.concatenate(next_obs_list, axis=0)
-    actions           = np.concatenate(act_list, axis=0)
-    rewards           = np.concatenate(rew_list, axis=0)
-    terminals         = np.concatenate(done_list, axis=0).astype(bool)
+    # 預先收集 list
+    out = dict(
+        actions=[], rewards=[], terminals=[]
+    )
+    if args.n_agent > 1:
+        out.update(dict(
+            local_state=[], next_local_state=[],
+            global_state=[], next_global_state=[]
+        ))
+    else:
+        out.update(dict(
+            observations=[], next_observations=[]
+        ))
 
-    return {
-        "observations":      observations,
-        "next_observations": next_observations,
-        "actions":           actions,
-        "rewards":           rewards,
-        "terminals":         terminals,
-    }
+    for sl in tqdm(segs, desc="slice episodes"):
+        nxt = slice(sl.start + 1, sl.stop + 1)          # 對應下一步
+        if nxt.stop > act_all.shape[0]:                 # 最後一步沒有 next
+            break
+
+        done_seg = done_all[sl]
+        term_seg = done_seg.astype(bool)
+
+        if args.n_agent > 1:
+            loc = local_all[sl]
+            glo = global_all[sl]
+            loc_next = local_all[nxt]
+            glo_next = global_all[nxt]
+            act_seg = act_all[sl]
+            rew_seg = rew_all[sl]
+
+            # append
+            out["local_state"].append(loc)
+            out["next_local_state"].append(loc_next)
+            out["global_state"].append(glo)
+            out["next_global_state"].append(glo_next)
+            out["actions"].append(act_seg)
+            out["rewards"].append(rew_seg)
+            out["terminals"].append(term_seg[:, None])   # (L,1)
+        else:
+            obs  = obs_all[sl]
+            obs2 = obs_all[nxt]
+            out["observations"].append(obs)
+            out["next_observations"].append(obs2)
+            out["actions"].append(act_all[sl])
+            out["rewards"].append(rew_all[sl])
+            out["terminals"].append(term_seg)
+
+    # -------- concat 回傳 --------
+    for k, v in out.items():
+        out[k] = np.concatenate(v, axis=0)
+
+    return out
 
 # --------------------------------------------------------
 # Main training loop (only diff: dataset loader & eval normalized score)
 # --------------------------------------------------------
-
-def train_agent(dataset_name: str, state_dim: int, action_dim: int, max_action: float,
+def train_agent(dataset_name: str, max_action: float,
                 device: str, output_dir: str, args: argparse.Namespace) -> None:
 
     # 1) -------- Load offline buffer ---------------------------------------
-    dataset = load_dataset_from_zarr(dataset_name, action_dim=action_dim)
-    # for i in dataset.keys():
-    #     print(i, dataset[i].shape)
-    data_sampler = Data_Sampler(dataset, device, args.reward_tune)
+    dataset = load_dataset_from_zarr(dataset_name, action_dim=args.a_dim, args=args)
+    data_sampler = Data_Sampler(dataset, device, args.reward_tune, args.n_agent > 1)
     utils.print_banner("Loaded zarr buffer")
 
     # 2) -------- Build agent -----------------------------------------------
-    from agents.ql_diffusion import Diffusion_QL as Agent
-    if args.algo == "ql":
-        agent = Agent(state_dim, action_dim, max_action, device,
-                      discount=args.discount, tau=args.tau,
-                      max_q_backup=args.max_q_backup, beta_schedule=args.beta_schedule,
-                      n_timesteps=args.T, eta=args.eta, lr=args.lr,
-                      lr_decay=args.lr_decay, lr_maxt=args.num_epochs,
-                      grad_norm=args.gn)
+    agent = None
+    if args.n_agent > 1:
+        from agents.ma_ql_diffusion import Diffusion_QL as Agent
+        agent = Agent(args.state_l_dim, args.state_g_dim, args.a_dim, args.n_agent, max_action, device,
+                discount=args.discount, tau=args.tau,
+                max_q_backup=args.max_q_backup, beta_schedule=args.beta_schedule,
+                n_timesteps=args.T, eta=args.eta, lr=args.lr,
+                lr_decay=args.lr_decay, lr_maxt=args.num_epochs,
+                grad_norm=args.gn)
     else:
-        from agents.bc_diffusion import Diffusion_BC as Agent
-        agent = Agent(state_dim, action_dim, max_action, device,
-                      discount=args.discount, tau=args.tau,
-                      beta_schedule=args.beta_schedule, n_timesteps=args.T, lr=args.lr)
+        from agents.ql_diffusion import Diffusion_QL as Agent
+        agent = Agent(args.s_dim, args.a_dim, max_action, device,
+                        discount=args.discount, tau=args.tau,
+                        max_q_backup=args.max_q_backup, beta_schedule=args.beta_schedule,
+                        n_timesteps=args.T, eta=args.eta, lr=args.lr,
+                        lr_decay=args.lr_decay, lr_maxt=args.num_epochs,
+                        grad_norm=args.gn)
 
     # 3) -------- Training + Eval -------------------------------------------
     max_steps = args.num_epochs * args.num_steps_per_epoch
@@ -180,9 +222,6 @@ if __name__ == "__main__":
     p.add_argument("--T", default=5, type=int)
     p.add_argument("--beta_schedule", default="vp")
 
-    # ----- algo -----------------------------------------------------------
-    p.add_argument("--algo", default="ql", choices=["ql", "bc"])
-
     args = p.parse_args()
 
     # ---------- preset from table ----------------------------------------
@@ -193,7 +232,7 @@ if __name__ == "__main__":
     args.device = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
 
     # ---------- logging dir ----------------------------------------------
-    fname = f"{args.env_name}|exp_{args.exp}|diffusion-{args.algo}|T-{args.T}"
+    fname = f"{args.env_name}|exp_{args.exp}|diffusion-ql|T-{args.T}"
     if args.lr_decay:
         fname += "|lr_decay"
 
@@ -206,13 +245,14 @@ if __name__ == "__main__":
 
     # ---------- build env & log ------------------------------------------
     setup_logger(results_dir.name, variant=vars(args), log_dir=str(results_dir))
-    utils.print_banner(f"Env: {args.env_name}, s_dim: {args.s_dim}, a_dim: {args.a_dim}")
+    if args.n_agent > 1:
+        utils.print_banner(f"Env: {args.env_name}, Local State Dim: {args.state_l_dim}, Global State Dim: {args.state_g_dim}, Action Dim: {args.a_dim}")
+    else:
+        utils.print_banner(f"Env: {args.env_name}, State Dim: {args.s_dim}, Action Dim: {args.a_dim}")
 
     # ---------- train -----------------------------------------------------
     train_agent(
         dataset_name=args.dataset_name,
-        state_dim=args.s_dim,
-        action_dim=args.a_dim,
         max_action=1.0, # 因為 one hot 所以是 1
         device=args.device,
         output_dir=str(results_dir),

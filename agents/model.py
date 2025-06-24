@@ -1,18 +1,9 @@
-# Copyright 2022 Twitter, Inc and Zhendong Wang.
-# SPDX-License-Identifier: Apache-2.0
-
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from agents.helpers import SinusoidalPosEmb
 
-
 class MLP(nn.Module):
-    """
-    MLP Model
-    """
     def __init__(self,
                  state_dim,
                  action_dim,
@@ -46,5 +37,3 @@ class MLP(nn.Module):
         x = self.mid_layer(x)
 
         return self.final_layer(x)
-
-
