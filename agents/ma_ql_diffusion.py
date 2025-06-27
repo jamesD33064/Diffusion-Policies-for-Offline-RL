@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from agents.diffusion import Diffusion
-from agents.model import MLP
+from model.diffusion import Diffusion
+from model.model import MLP
 from tqdm import tqdm
 import copy, itertools
 from itertools import chain
@@ -64,6 +64,14 @@ class Diffusion_QL(object):
                  grad_norm=1.0,
                  ):
 
+        self.max_action = max_action
+        self.action_dim = action_dim
+        self.discount = discount
+        self.tau = tau
+        self.eta = eta  # q_learning weight
+        self.device = device
+        self.n_agent = n_agent
+
         # -------- Actors & EMA actors ----------
         self.actors      = nn.ModuleList()
         self.ema_actors  = nn.ModuleList()
@@ -100,13 +108,6 @@ class Diffusion_QL(object):
         if lr_decay:
             self.actor_lr_scheduler = CosineAnnealingLR(self.actor_opt, T_max=lr_maxt, eta_min=0.)
             self.critic_lr_scheduler = CosineAnnealingLR(self.critic_opt, T_max=lr_maxt, eta_min=0.)
-
-        self.max_action = max_action
-        self.action_dim = action_dim
-        self.discount = discount
-        self.tau = tau
-        self.eta = eta  # q_learning weight
-        self.device = device
 
     @torch.no_grad()
     # -------- 更新EMA ----------
@@ -210,14 +211,49 @@ class Diffusion_QL(object):
 
         return metric
 
-    def sample_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
-        state_rpt = torch.repeat_interleave(state, repeats=50, dim=0)
-        with torch.no_grad():
-            action = self.actor.sample(state_rpt)
-            q_value = self.critic_target.q_min(state_rpt, action).flatten()
-            idx = torch.multinomial(F.softmax(q_value), 1)
-        return action[idx].cpu().data.numpy().flatten()
+    @torch.no_grad()
+    def sample_action(self, state_l, state_g, k_candidate=50):
+        # state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        # state_rpt = torch.repeat_interleave(state, repeats=50, dim=0)
+        # with torch.no_grad():
+        #     action = self.actor.sample(state_rpt)
+        #     q_value = self.critic_target.q_min(state_rpt, action).flatten()
+        #     idx = torch.multinomial(F.softmax(q_value), 1)
+        # return action[idx].cpu().data.numpy().flatten()
+    
+        # ----- 將 numpy 轉 tensor -----
+        obs_l = torch.tensor(state_l, dtype=torch.float32, device=self.device)           # (N, O_l)
+        if state_g is not None:
+            s_g  = torch.tensor(state_g,  dtype=torch.float32, device=self.device)       # (S_g,)
+            s_g  = s_g.unsqueeze(0).repeat(k_candidate, 1)                               # (K, S_g)
+
+        # ----- 為每個 agent 重複觀測 K 次並抽樣 K 個動作 -----
+        cand_actions = []                              # list[(K, act_dim)]
+        for i, actor_i in enumerate(self.actors):
+            obs_i_rep = obs_l[i].unsqueeze(0).repeat(k_candidate, 1)   # (K, O_l)
+            a_i_k     = actor_i.sample(obs_i_rep)                      # (K, act_dim)
+            cand_actions.append(a_i_k)
+
+        # ----- 拼成 K 組 joint-action 向量 -----
+        joint_a = torch.cat(cand_actions, dim=-1)      # (K, N*act_dim)
+
+        # ----- 用 critic 打分 -----
+        if state_g is None:
+            raise ValueError("central critic 需要 state_g 輸入")
+        q_val  = self.critic_target.q_min(s_g, joint_a).squeeze(-1)    # (K,)
+
+        # ----- 依 softmax 機率抽 1 組，或直接 argmax -----
+        # idx = torch.multinomial(torch.softmax(q_val, dim=0), 1).item()   # 隨機（探勘）
+        idx = torch.argmax(q_val).item()                                 # 貪婪（利用）
+
+        # ----- 拆回 per-agent 動作 -----
+        act_dim = cand_actions[0].shape[1]
+        action_out = []
+        for j in range(self.n_agent):
+            a_j = joint_a[idx, j*act_dim:(j+1)*act_dim]                  # (act_dim,)
+            action_out.append(a_j.cpu().numpy())
+
+        return np.stack(action_out, axis=0)        # (n_agent, act_dim)
 
     def save_model(self, dir, epoch=None):
         os.makedirs(dir, exist_ok=True)
@@ -231,7 +267,7 @@ class Diffusion_QL(object):
 
         print(f"[Checkpoint] saved to: {dir} (epoch={epoch})")
 
-    def load_model(self, dir, epoch=None):    
+    def load_model(self, dir, epoch=None, map_location=None):    
         map_location = map_location or self.device
         # ---------- 讀取每個 actor ----------
         for idx, actor in enumerate(self.actors):
