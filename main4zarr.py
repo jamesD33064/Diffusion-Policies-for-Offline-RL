@@ -26,7 +26,8 @@ from agents.ql_diffusion import Diffusion_QL as Agent
 hyperparameters: Dict[str, Dict] = {
     'CMO_MoveTo':   {'dataset_name':'DiffusionQL_MoveTo_V3.zarr', 'n_agent': 1, 's_dim': 3, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 2000, 'gn': 5.0, 'top_k': 1},
     'CMO_1V1':      {'dataset_name':'DiffusionQL_1v1_V2.zarr', 'n_agent': 1, 's_dim': 8, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1},
-    'CMO_3V3':      {'dataset_name':'DiffusionQL_3v3_V2.zarr', 'n_agent': 3, 'state_l_dim': 29, 'state_g_dim': 27, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1}
+    'CMO_3V3':      {'dataset_name':'DiffusionQL_3v3_V2.zarr', 'n_agent': 3, 'state_l_dim': 29, 'state_g_dim': 27, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1},
+    'CMO_7V7':      {'dataset_name':'DiffusionQL_7v7_V1.zarr', 'n_agent': 7, 'state_l_dim': 65, 'state_g_dim': 63, 'a_dim': 4, 'lr': 3e-4, 'eta': 1.0, 'max_q_backup': False, 'reward_tune': 'normalize', 'eval_freq': 1, 'num_epochs': 100, 'gn': 5.0, 'top_k': 1}
 }
 
 # --------------------------------------------------------

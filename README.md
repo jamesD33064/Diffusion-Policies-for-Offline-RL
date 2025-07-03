@@ -31,6 +31,8 @@ python main4zarr.py --env_name << env name >> --lr_decay --exp << exp number >>
 
 # example
 python main4zarr.py --env_name CMO_1V1 --lr_decay --exp 1
+python main4zarr.py --env_name CMO_3V3 --lr_decay --exp 1
+python main4zarr.py --env_name CMO_7V7 --lr_decay --exp 1
 ```
 
 

@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from model.diffusion import Diffusion
-from model.model import MLP
+from agents.diffusion import Diffusion
+from agents.model import MLP
 from tqdm import tqdm
 import copy, itertools
 from itertools import chain
