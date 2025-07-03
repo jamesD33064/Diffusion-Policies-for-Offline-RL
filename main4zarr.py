@@ -6,8 +6,6 @@ from typing import Dict, Tuple
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import gymnasium as gym
-import minari
 import numpy as np
 import torch
 import json
@@ -15,10 +13,7 @@ from tqdm import tqdm
 
 from utils import utils
 from utils.data_sampler import Data_Sampler
-from utils.logger import logger, setup_logger
 from torch.utils.tensorboard import SummaryWriter
-from gymnasium.wrappers import RecordVideo
-from agents.ql_diffusion import Diffusion_QL as Agent
 
 # --------------------------------------------------------
 # Globals ────────────── hyper-parameters per dataset
@@ -183,9 +178,6 @@ def train_agent(dataset_name: str, max_action: float,
 
         # log ---------------------------------------------------------------
         curr_epoch = agent.step // args.num_steps_per_epoch
-        logger.record_tabular("Epoch", curr_epoch)
-        logger.record_tabular("BC Loss", np.mean(loss["bc_loss"]))
-        logger.dump_tabular()
 
         # early stop / model selection -------------------------------------
         metric = np.mean(loss["bc_loss"])
@@ -245,7 +237,6 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # ---------- build env & log ------------------------------------------
-    setup_logger(results_dir.name, variant=vars(args), log_dir=str(results_dir))
     if args.n_agent > 1:
         utils.print_banner(f"Env: {args.env_name}, Local State Dim: {args.state_l_dim}, Global State Dim: {args.state_g_dim}, Action Dim: {args.a_dim}")
     else:
